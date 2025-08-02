@@ -1,0 +1,80 @@
+using System;
+using System.Data;
+using System.Data.SqlClient;
+
+namespace QuanLiNhaThuoc
+{
+    public class DatabaseHelper : IDisposable
+    {
+        private readonly string connectionString = "Server=DESKTOP-54F5IJ3;Database=QuanLiNhaThuoc;Integrated Security=True;";
+        private SqlConnection connection;
+
+        public DatabaseHelper()
+        {
+            connection = new SqlConnection(connectionString);
+        }
+
+        public void OpenConnection()
+        {
+            if (connection.State == ConnectionState.Closed)
+                connection.Open();
+        }
+
+        public void CloseConnection()
+        {
+            if (connection.State == ConnectionState.Open)
+                connection.Close();
+        }
+
+        public DataTable ExecuteQuery(string query)
+        {
+            DataTable dt = new DataTable();
+            try
+            {
+                OpenConnection();
+                using (SqlCommand cmd = new SqlCommand(query, connection))
+                using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
+                {
+                    adapter.Fill(dt);
+                }
+            }
+            finally
+            {
+                CloseConnection();
+            }
+            return dt;
+        }
+
+        public int ExecuteNonQuery(string query)
+        {
+            int result = 0;
+            try
+            {
+                OpenConnection();
+                using (SqlCommand cmd = new SqlCommand(query, connection))
+                {
+                    result = cmd.ExecuteNonQuery();
+                }
+            }
+            finally
+            {
+                CloseConnection();
+            }
+            return result;
+        }
+
+        public System.Data.SqlClient.SqlCommand GetCommand(string query)
+        {
+            return new System.Data.SqlClient.SqlCommand(query, connection);
+        }
+
+        public void Dispose()
+        {
+            if (connection != null)
+            {
+                connection.Dispose();
+                connection = null;
+            }
+        }
+    }
+}

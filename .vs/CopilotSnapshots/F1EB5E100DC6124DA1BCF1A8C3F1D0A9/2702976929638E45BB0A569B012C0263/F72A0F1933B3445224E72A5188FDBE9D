@@ -1,0 +1,162 @@
+﻿using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Data;
+using System.Drawing;
+using System.Linq;
+using System.Text;
+using System.Windows.Forms;
+using DevExpress.XtraCharts;
+
+namespace QuanLiNhaThuoc
+{
+    public partial class Form1 : DevExpress.XtraEditors.XtraForm
+    {
+ 
+
+        public Form1()
+        {
+            InitializeComponent();
+            this.Load += Form1_Load;
+            this.Load += FormDashboard_Load;
+        }
+
+        private void Form1_Load(object sender, EventArgs e)
+        {
+            timerClock.Tick += timerClock_Tick;
+            timerClock.Interval = 1000; // 1 giây
+            timerClock.Start();
+        }
+
+        private void timerClock_Tick(object sender, EventArgs e)
+        {
+            lblTime.Text = DateTime.Now.ToString("HH:mm:ss");
+            lblDate.Text = DateTime.Now.ToString("dd/MM/yyyy");
+        }
+
+        private void FormDashboard_Load(object sender, EventArgs e)
+        {
+            using (var db = new DatabaseHelper())
+            {
+                // 1. Doanh thu hôm nay
+                string queryDoanhThu = $@"SELECT ISNULL(SUM(TongTien), 0) AS DoanhThu FROM HoaDon     WHERE CAST(NgayBan AS DATE) = '2024-06-01'";
+                var dtDoanhThu = db.ExecuteQuery(queryDoanhThu);
+                lblDoanhThuHomNay.Text = string.Format("{0:N0} đ", dtDoanhThu.Rows[0][0]);
+
+                // 2. Số lượng thuốc sắp hết (ví dụ: SoLuongTon <= 10)
+                string querySapHet = "SELECT COUNT(*) AS SoLuongThuocSapHet FROM Thuoc WHERE SoLuongTon <= 50";
+                var dtSapHet = db.ExecuteQuery(querySapHet);
+                lblThuocSapHet.Text = dtSapHet.Rows[0][0].ToString();
+
+                // 3. Số loại thuốc sắp hết hạn (trong 30 ngày tới)
+                string querySapHetHan = @"SELECT COUNT(DISTINCT MaThuoc) FROM ChiTietPhieuNhap WHERE HanSuDung <= DATEADD(day, 30, GETDATE()) AND HanSuDung >= GETDATE()";
+                var dtSapHetHan = db.ExecuteQuery(querySapHetHan);
+                lblThuocSapHetHan.Text = dtSapHetHan.Rows[0][0].ToString();
+
+                // 4. Hóa đơn gần nhất
+                string queryHD = @"SELECT TOP 1 h.MaHoaDon, k.HoTenKH, h.NgayBan FROM HoaDon h JOIN KhachHang k ON h.MaKhachHang = k.MaKhachHang ORDER BY h.NgayBan DESC, h.MaHoaDon DESC";
+                var dtHD = db.ExecuteQuery(queryHD);
+                if (dtHD.Rows.Count > 0)
+                {
+                    var row = dtHD.Rows[0];
+                    lblHoaDon.Text = $"HD: {row[0]} - {row[1]} - {Convert.ToDateTime(row[2]):dd/MM/yyyy}";
+                }
+                else
+                {
+                    lblHoaDon.Text = "Không có hóa đơn";
+                }
+            }
+            LoadChartBanNhap();
+        }
+
+        private void LoadChartBanNhap()
+        {
+            // Lấy 7 ngày gần nhất
+            var today = DateTime.Today;
+            var fromDate = today.AddDays(-6);
+            // Truy vấn SQL lấy tổng số lượng bán và nhập theo ngày
+            string query = @"
+                SELECT Ngay, SUM(Ban) AS Ban, SUM(Nhap) AS Nhap FROM (
+                    SELECT CONVERT(date, h.NgayBan) AS Ngay, SUM(cthd.SoLuong) AS Ban, 0 AS Nhap                    
+                    FROM HoaDon h
+                    JOIN ChiTietHoaDon cthd ON h.MaHoaDon = cthd.MaHoaDon
+                    WHERE h.NgayBan >= @fromDate AND h.NgayBan <= @toDate
+                    GROUP BY CONVERT(date, h.NgayBan)
+
+                    UNION ALL
+
+                    SELECT CONVERT(date, pn.NgayNhap) AS Ngay, 0 AS Ban, SUM(ctpn.SoLuongNhap) AS Nhap
+                    FROM PhieuNhap pn
+                    JOIN ChiTietPhieuNhap ctpn ON pn.MaPhieuNhap = ctpn.MaPhieuNhap
+                    WHERE pn.NgayNhap >= @fromDate AND pn.NgayNhap <= @toDate
+                    GROUP BY CONVERT(date, pn.NgayNhap)) AS t
+                    GROUP BY Ngay
+                    ORDER BY Ngay;";
+            DateTime FromDate = new DateTime(2024, 6, 3); // Thứ 2 đầu tuần
+            DateTime toDate = new DateTime(2024, 6, 9);   // Chủ nhật cuối tuần
+
+            DataTable dt;
+            using (var db = new DatabaseHelper())
+            {
+                using (var cmd = db.GetCommand(query))
+                {
+                    cmd.Parameters.Add("@FromDate", SqlDbType.Date).Value = FromDate;
+                    cmd.Parameters.Add("@toDate", SqlDbType.Date).Value = toDate;
+
+                    dt = new DataTable();
+                    db.OpenConnection();
+                    using (var adapter = new System.Data.SqlClient.SqlDataAdapter(cmd))
+                    {
+                        adapter.Fill(dt);
+                    }
+                    db.CloseConnection();
+                }
+            }
+            // Chuẩn bị dữ liệu cho 7 ngày liên tục
+            var days = new string[7];
+            var ban = new int[7];
+            var nhap = new int[7];
+            for (int i = 0; i < 7; i++)
+            {
+                var d = fromDate.AddDays(i);
+                days[i] = d.ToString("dd/MM/yyyy");
+                var row = dt.Select($"Ngay = '{d:yyyy-MM-dd}'");
+                if (row.Length > 0)
+                {
+                    ban[i] = row[0]["Ban"] != DBNull.Value ? Convert.ToInt32(row[0]["Ban"]) : 0;
+                    nhap[i] = row[0]["Nhap"] != DBNull.Value ? Convert.ToInt32(row[0]["Nhap"]) : 0;
+                }
+                else
+                {
+                    ban[i] = 0;
+                    nhap[i] = 0;
+                }
+            }
+            // Cấu hình chart
+            chartBan_Nhap.Series.Clear();
+            Series seriesBan = new Series("Bán", ViewType.Bar);
+            Series seriesNhap = new Series("Nhập", ViewType.Bar);
+            for (int i = 0; i < 7; i++)
+            {
+                seriesBan.Points.Add(new SeriesPoint(days[i], ban[i]));
+                seriesNhap.Points.Add(new SeriesPoint(days[i], nhap[i]));
+            }
+            chartBan_Nhap.Series.AddRange(new Series[] { seriesBan, seriesNhap });
+            // Tiêu đề, nhãn trục, chú thích tiếng Việt
+            chartBan_Nhap.Titles.Clear();
+            chartBan_Nhap.Titles.Add(new ChartTitle() { Text = "Thống kê bán & nhập trong 7 ngày qua", Font = new Font("Segoe UI", 14, FontStyle.Bold) });
+            var diagram = chartBan_Nhap.Diagram as XYDiagram;
+            if (diagram != null)
+            {
+                diagram.AxisX.Title.Text = "Ngày";
+                diagram.AxisX.Title.Visibility = DevExpress.Utils.DefaultBoolean.True;
+                diagram.AxisX.Label.Angle = -45;
+                diagram.AxisY.Title.Text = "Số lượng";
+                diagram.AxisY.Title.Visibility = DevExpress.Utils.DefaultBoolean.True;
+            }
+            chartBan_Nhap.Legend.Visibility = DevExpress.Utils.DefaultBoolean.True;
+            chartBan_Nhap.Legend.AlignmentHorizontal = LegendAlignmentHorizontal.Center;
+            chartBan_Nhap.Legend.AlignmentVertical = LegendAlignmentVertical.BottomOutside;
+        }
+    }
+}

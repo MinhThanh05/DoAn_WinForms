@@ -1,0 +1,70 @@
+﻿using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Data;
+using System.Drawing;
+using System.Linq;
+using System.Text;
+using System.Windows.Forms;
+
+namespace QuanLiNhaThuoc
+{
+    public partial class Form1 : DevExpress.XtraEditors.XtraForm
+    {
+ 
+
+        public Form1()
+        {
+            InitializeComponent();
+            this.Load += Form1_Load;
+            this.Load += FormDashboard_Load;
+        }
+
+        private void Form1_Load(object sender, EventArgs e)
+        {
+            timerClock.Tick += timerClock_Tick;
+            timerClock.Interval = 1000; // 1 giây
+            timerClock.Start();
+        }
+
+        private void timerClock_Tick(object sender, EventArgs e)
+        {
+            lblTime.Text = DateTime.Now.ToString("HH:mm:ss");
+            lblDate.Text = DateTime.Now.ToString("dd/MM/yyyy");
+        }
+
+        private void FormDashboard_Load(object sender, EventArgs e)
+        {
+            using (var db = new DatabaseHelper())
+            {
+                // 1. Doanh thu hôm nay
+                string queryDoanhThu = $@"SELECT ISNULL(SUM(TongTien),0) FROM HoaDon WHERE NgayBan = CONVERT(date, GETDATE())";
+                var dtDoanhThu = db.ExecuteQuery(queryDoanhThu);
+                lblDoanhThuHomNay.Text = string.Format("{0:N0} đ", dtDoanhThu.Rows[0][0]);
+
+                // 2. Số lượng thuốc sắp hết (ví dụ: SoLuongTon <= 10)
+                string querySapHet = "SELECT COUNT(*) FROM Thuoc WHERE SoLuongTon <= 10";
+                var dtSapHet = db.ExecuteQuery(querySapHet);
+                lblThuocSapHet.Text = dtSapHet.Rows[0][0].ToString();
+
+                // 3. Số loại thuốc sắp hết hạn (trong 30 ngày tới)
+                string querySapHetHan = @"SELECT COUNT(DISTINCT MaThuoc) FROM ChiTietPhieuNhap WHERE HanSuDung <= DATEADD(day, 30, GETDATE()) AND HanSuDung >= GETDATE()";
+                var dtSapHetHan = db.ExecuteQuery(querySapHetHan);
+                lblThuocSapHetHan.Text = dtSapHetHan.Rows[0][0].ToString();
+
+                // 4. Hóa đơn gần nhất
+                string queryHD = @"SELECT TOP 1 h.MaHoaDon, k.HoTenKH, h.NgayBan FROM HoaDon h JOIN KhachHang k ON h.MaKhachHang = k.MaKhachHang ORDER BY h.NgayBan DESC, h.MaHoaDon DESC";
+                var dtHD = db.ExecuteQuery(queryHD);
+                if (dtHD.Rows.Count > 0)
+                {
+                    var row = dtHD.Rows[0];
+                    lblHoaDon.Text = $"HD: {row[0]} - {row[1]} - {Convert.ToDateTime(row[2]):dd/MM/yyyy}";
+                }
+                else
+                {
+                    lblHoaDon.Text = "Không có hóa đơn";
+                }
+            }
+        }
+    }
+}
